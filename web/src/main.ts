@@ -1,6 +1,6 @@
 import type { DetectedObject, ObjectDetection } from "@tensorflow-models/coco-ssd";
 import "./style.css";
-import type { AppState, DetectionResult, Incident } from "./contracts";
+import type { AppState, DetectionResult, EvidenceResult, Incident } from "./contracts";
 import { confidenceLabel, incidentTime, statusLabel } from "./format";
 
 function element<T extends HTMLElement>(id: string): T {
@@ -27,10 +27,13 @@ const incidentTitle = element<HTMLHeadingElement>("incidentTitle");
 const incidentSummary = element<HTMLParagraphElement>("incidentSummary");
 const incidentConfidence = element<HTMLElement>("incidentConfidence");
 const incidentRegion = element<HTMLElement>("incidentRegion");
+const incidentPeople = element<HTMLElement>("incidentPeople");
+const incidentAnalysis = element<HTMLElement>("incidentAnalysis");
 const incidentId = element<HTMLElement>("incidentId");
 const incidentSeenAt = element<HTMLElement>("incidentTime");
 const callInstruction = element<HTMLParagraphElement>("callInstruction");
 const callButton = element<HTMLAnchorElement>("callButton");
+const reportButton = element<HTMLAnchorElement>("reportButton");
 const phoneNumber = element<HTMLElement>("phoneNumber");
 
 let model: ObjectDetection | null = null;
@@ -58,6 +61,8 @@ function resetIncidentUi(required = 3): void {
     "Three consecutive camera confirmations will prepare a concise inbound briefing.";
   incidentConfidence.textContent = "—";
   incidentRegion.textContent = "—";
+  incidentPeople.textContent = "—";
+  incidentAnalysis.textContent = "—";
   incidentId.textContent = "—";
   incidentSeenAt.textContent = "—";
   confirmationText.textContent = `0 / ${required} CONFIRMATIONS`;
@@ -65,6 +70,9 @@ function resetIncidentUi(required = 3): void {
   callButton.classList.add("is-disabled");
   callButton.removeAttribute("href");
   callButton.setAttribute("aria-disabled", "true");
+  reportButton.classList.add("is-disabled");
+  reportButton.removeAttribute("href");
+  reportButton.setAttribute("aria-disabled", "true");
   setFlow(stream ? "vision" : "camera");
 }
 
@@ -72,10 +80,17 @@ function renderIncident(incident: Incident, required: number): void {
   currentIncidentId = incident.id;
   incidentRail.classList.add("has-incident");
   incidentKicker.textContent = statusLabel(incident.status);
-  incidentTitle.innerHTML = "Person seen.<br />Brief ready.";
+  const people = incident.people_count;
+  if (incident.analysis_status === "complete" && people !== null) {
+    incidentTitle.innerHTML = `${people} ${people === 1 ? "person" : "people"} seen.<br />Brief ready.`;
+  } else {
+    incidentTitle.innerHTML = "Person seen.<br />Analyzing scene.";
+  }
   incidentSummary.textContent = incident.summary;
   incidentConfidence.textContent = confidenceLabel(incident.confidence);
   incidentRegion.textContent = incident.frame_region.toUpperCase();
+  incidentPeople.textContent = people === null ? "PENDING" : String(people);
+  incidentAnalysis.textContent = incident.analysis_status.toUpperCase();
   incidentId.textContent = incident.id;
   incidentSeenAt.textContent = incidentTime(incident.detected_at);
   confirmationText.textContent = `${required} / ${required} VERIFIED`;
@@ -87,6 +102,11 @@ function renderIncident(incident: Incident, required: number): void {
     callButton.href = `tel:${currentPhone}`;
     callButton.classList.remove("is-disabled");
     callButton.setAttribute("aria-disabled", "false");
+  }
+  if (incident.report_url) {
+    reportButton.href = incident.report_url;
+    reportButton.classList.remove("is-disabled");
+    reportButton.setAttribute("aria-disabled", "false");
   }
   setFlow(incident.status === "awaiting_inbound_call" ? "incident" : "guava");
 }
@@ -109,24 +129,25 @@ async function refreshState(): Promise<void> {
   }
 }
 
-function drawPrediction(prediction: DetectedObject | null): void {
+function drawPredictions(predictions: DetectedObject[]): void {
   const context = canvas.getContext("2d");
   if (!context || !video.videoWidth) return;
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
   context.clearRect(0, 0, canvas.width, canvas.height);
-  if (!prediction) return;
-  const [x, y, width, height] = prediction.bbox;
-  context.strokeStyle = "#62d84e";
-  context.lineWidth = Math.max(3, canvas.width / 360);
-  context.strokeRect(x, y, width, height);
-  context.fillStyle = "#62d84e";
-  context.font = `700 ${Math.max(16, canvas.width / 38)}px ui-monospace, monospace`;
-  const label = `PERSON ${confidenceLabel(prediction.score)}`;
-  const labelWidth = context.measureText(label).width + 22;
-  context.fillRect(x, Math.max(0, y - 38), labelWidth, 38);
-  context.fillStyle = "#071006";
-  context.fillText(label, x + 11, Math.max(26, y - 11));
+  predictions.forEach((prediction, index) => {
+    const [x, y, width, height] = prediction.bbox;
+    context.strokeStyle = "#62d84e";
+    context.lineWidth = Math.max(3, canvas.width / 360);
+    context.strokeRect(x, y, width, height);
+    context.fillStyle = "#62d84e";
+    context.font = `700 ${Math.max(16, canvas.width / 38)}px ui-monospace, monospace`;
+    const label = `PERSON ${index + 1} · ${confidenceLabel(prediction.score)}`;
+    const labelWidth = context.measureText(label).width + 22;
+    context.fillRect(x, Math.max(0, y - 38), labelWidth, 38);
+    context.fillStyle = "#071006";
+    context.fillText(label, x + 11, Math.max(26, y - 11));
+  });
 }
 
 function captureEvidence(): string {
@@ -145,8 +166,9 @@ function captureEvidence(): string {
 }
 
 async function sendObservation(
-  prediction: DetectedObject | null,
+  people: DetectedObject[],
 ): Promise<DetectionResult> {
+  const prediction = people[0] ?? null;
   const bbox = prediction
     ? {
         x: video.videoWidth - prediction.bbox[0] - prediction.bbox[2],
@@ -164,6 +186,7 @@ async function sendObservation(
       person_present: Boolean(prediction),
       confidence: prediction?.score ?? 0,
       camera_name: "MAC-01",
+      local_people_count: people.length,
       bbox,
     }),
   });
@@ -171,12 +194,14 @@ async function sendObservation(
   return (await response.json()) as DetectionResult;
 }
 
-async function attachEvidence(incidentIdValue: string): Promise<void> {
-  await fetch(`/api/incidents/${incidentIdValue}/evidence`, {
+async function attachEvidence(incidentIdValue: string): Promise<EvidenceResult> {
+  const response = await fetch(`/api/incidents/${incidentIdValue}/evidence`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ image_data_url: captureEvidence() }),
   });
+  if (!response.ok) throw new Error(`Scene analysis failed: ${response.status}`);
+  return (await response.json()) as EvidenceResult;
 }
 
 async function detectFrame(timestamp: number): Promise<void> {
@@ -188,19 +213,21 @@ async function detectFrame(timestamp: number): Promise<void> {
   const started = performance.now();
   try {
     const predictions = await model.detect(video, 10, 0.35);
-    const person =
-      predictions
-        .filter((prediction) => prediction.class === "person")
-        .sort((a, b) => b.score - a.score)[0] ?? null;
-    drawPrediction(person);
-    const result = await sendObservation(person);
+    const people = predictions
+      .filter((prediction) => prediction.class === "person")
+      .sort((a, b) => b.score - a.score);
+    const person = people[0] ?? null;
+    drawPredictions(people);
+    const result = await sendObservation(people);
     const latency = Math.round(performance.now() - started);
     frameRate.textContent = `${latency} MS`;
     confirmationText.textContent = `${result.streak} / ${result.required_streak} CONFIRMATIONS`;
 
     if (person) {
       stage.classList.add("has-person");
-      visionLabel.textContent = result.created ? "PERSON VERIFIED" : "PERSON CANDIDATE";
+      visionLabel.textContent = result.created
+        ? "OPENAI ANALYZING SCENE"
+        : `${people.length} PERSON${people.length === 1 ? "" : "S"} CANDIDATE`;
       confidenceText.textContent = `CONFIDENCE ${confidenceLabel(person.score)}`;
       setFlow(result.created ? "incident" : "vision");
     } else {
@@ -211,7 +238,12 @@ async function detectFrame(timestamp: number): Promise<void> {
 
     if (result.incident) renderIncident(result.incident, result.required_streak);
     if (result.created && result.incident) {
-      await attachEvidence(result.incident.id);
+      const analyzed = await attachEvidence(result.incident.id);
+      renderIncident(analyzed.incident, result.required_streak);
+      visionLabel.textContent =
+        analyzed.incident.analysis_status === "complete"
+          ? `OPENAI: ${analyzed.incident.people_count ?? "—"} PEOPLE IN SCENE`
+          : "OPENAI ANALYSIS UNAVAILABLE";
       incidentRail.animate(
         [
           { transform: "translateX(12px)", opacity: 0.5 },

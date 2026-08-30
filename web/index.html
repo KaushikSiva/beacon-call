@@ -48,7 +48,7 @@
             <div class="scan-line" aria-hidden="true"></div>
             <div class="camera-corners" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
             <div class="camera-overlay-top">
-              <span>COCO-SSD / PERSON</span>
+              <span>COCO TRIGGER + OPENAI SCENE</span>
               <span id="frameRate">READY</span>
             </div>
             <div class="camera-overlay-bottom">
@@ -59,7 +59,7 @@
 
           <div class="safety-note">
             <span class="safety-index">01</span>
-            <p><strong>Presence only.</strong> BeaconCall does not infer falls, injury, identity, or distress.</p>
+            <p><strong>Observable scene only.</strong> BeaconCall counts people and describes visible details without identifying or diagnosing anyone.</p>
             <span id="confirmationText">0 / 3 CONFIRMATIONS</span>
           </div>
         </div>
@@ -77,6 +77,8 @@
           <dl class="incident-facts">
             <div><dt>CONFIDENCE</dt><dd id="incidentConfidence">—</dd></div>
             <div><dt>FRAME REGION</dt><dd id="incidentRegion">—</dd></div>
+            <div><dt>PEOPLE</dt><dd id="incidentPeople">—</dd></div>
+            <div><dt>OPENAI ANALYSIS</dt><dd id="incidentAnalysis">—</dd></div>
             <div><dt>INCIDENT</dt><dd id="incidentId">—</dd></div>
             <div><dt>SEEN AT</dt><dd id="incidentTime">—</dd></div>
           </dl>
@@ -86,6 +88,9 @@
             <p id="callInstruction">Start the Guava Expert, then dial after a sighting.</p>
             <a id="callButton" class="call-button is-disabled" aria-disabled="true">
               <span>CALL FOR BRIEFING</span><b>↗</b>
+            </a>
+            <a id="reportButton" class="report-button is-disabled" aria-disabled="true">
+              DOWNLOAD INCIDENT PDF
             </a>
             <small id="phoneNumber">SET GUAVA_AGENT_NUMBER</small>
           </div>

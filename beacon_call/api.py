@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import logging
 import os
 from pathlib import Path
 
@@ -11,14 +12,23 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
+from openai import OpenAIError
 
-from beacon_call.models import AppState, DetectionResult, EvidencePayload, Observation
+from beacon_call.models import (
+    AppState,
+    DetectionResult,
+    EvidencePayload,
+    EvidenceResult,
+    Observation,
+)
+from beacon_call.scene import SceneAnalysisError, analyze_scene
 from beacon_call.store import IncidentStore
 from beacon_call.vision_gate import PresenceGate
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 WEB_DIST = PROJECT_DIR / "web-dist"
 load_dotenv(PROJECT_DIR / ".env")
+logger = logging.getLogger("beacon_call.api")
 store = IncidentStore.from_environment()
 gate = PresenceGate()
 
@@ -60,6 +70,7 @@ def observe(observation: Observation) -> DetectionResult:
             camera_name=observation.camera_name,
             confidence=observation.confidence,
             bbox=observation.bbox,
+            detector_people_count=observation.local_people_count,
         )
     return DetectionResult(
         streak=gate.streak,
@@ -69,8 +80,8 @@ def observe(observation: Observation) -> DetectionResult:
     )
 
 
-@app.post("/api/incidents/{incident_id}/evidence")
-def attach_evidence(incident_id: str, payload: EvidencePayload) -> dict[str, object]:
+@app.post("/api/incidents/{incident_id}/evidence", response_model=EvidenceResult)
+def attach_evidence(incident_id: str, payload: EvidencePayload) -> EvidenceResult:
     prefix = "data:image/jpeg;base64,"
     if not payload.image_data_url.startswith(prefix):
         raise HTTPException(status_code=400, detail="Expected a JPEG data URL")
@@ -84,7 +95,20 @@ def attach_evidence(incident_id: str, payload: EvidencePayload) -> dict[str, obj
         incident = store.attach_evidence(incident_id, jpeg_bytes)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Incident not found") from exc
-    return {"incident": incident}
+
+    analysis_error = None
+    try:
+        analysis, model = analyze_scene(jpeg_bytes)
+        incident = store.record_scene_analysis(incident_id, analysis=analysis, model=model)
+    except SceneAnalysisError as exc:
+        logger.warning("OpenAI scene analysis unavailable: %s", exc)
+        incident = store.record_analysis_failure(incident_id)
+        analysis_error = str(exc)
+    except (OpenAIError, ValueError) as exc:
+        logger.warning("OpenAI scene analysis failed: %s", type(exc).__name__)
+        incident = store.record_analysis_failure(incident_id)
+        analysis_error = "OpenAI scene analysis failed; check the API key and model access"
+    return EvidenceResult(incident=incident, analysis_error=analysis_error)
 
 
 @app.get("/api/evidence/{filename}")
@@ -95,6 +119,21 @@ def evidence(filename: str) -> FileResponse:
     if not path.exists():
         raise HTTPException(status_code=404, detail="Evidence not found")
     return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/reports/{filename}")
+def report(filename: str) -> FileResponse:
+    if not filename.endswith(".pdf") or Path(filename).name != filename:
+        raise HTTPException(status_code=400, detail="Invalid report filename")
+    path = store.report_dir / filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Report not found")
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=filename,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.post("/api/demo/reset", response_model=AppState)

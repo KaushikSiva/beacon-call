@@ -21,7 +21,13 @@ class Observation(BaseModel):
     person_present: bool
     confidence: float = Field(default=0, ge=0, le=1)
     camera_name: str = Field(default="MAC-01", min_length=1, max_length=40)
+    local_people_count: int = Field(default=1, ge=0, le=20)
     bbox: BoundingBox | None = None
+
+
+class SceneAnalysis(BaseModel):
+    people_count: int = Field(ge=0, le=20)
+    scene_description: str = Field(min_length=1, max_length=500)
 
 
 class Incident(BaseModel):
@@ -32,7 +38,13 @@ class Incident(BaseModel):
     frame_region: str
     summary: str
     status: Literal["awaiting_inbound_call", "acknowledged", "monitoring", "inspect"]
+    detector_people_count: int = Field(default=1, ge=0, le=20)
+    people_count: int | None = Field(default=None, ge=0, le=20)
+    scene_description: str | None = None
+    analysis_status: Literal["pending", "complete", "failed"] = "pending"
+    analysis_model: str | None = None
     evidence_url: str | None = None
+    report_url: str | None = None
     call_id: str | None = None
     operator_name: str | None = None
     response: str | None = None
@@ -58,13 +70,18 @@ class EvidencePayload(BaseModel):
     image_data_url: str = Field(min_length=20, max_length=3_000_000)
 
 
+class EvidenceResult(BaseModel):
+    incident: Incident
+    analysis_error: str | None = None
+
+
 class AppState(BaseModel):
     incident: Incident | None
     streak: int
     required_streak: int
     phone_number: str | None
-    detector: str = "COCO-SSD / MobileNet v2"
-    limitation: str = "Presence only — no fall, injury, identity, or emergency inference."
+    detector: str = "COCO-SSD trigger + OpenAI scene analysis"
+    limitation: str = "Observable scene only — no identity, injury, or emergency diagnosis."
 
 
 def utc_now_iso() -> str:

@@ -1,8 +1,8 @@
 """BeaconCall's Guava inbound voice Expert.
 
-The Mac camera app writes a presence-only observation to ``runtime``. A rescuer
-then calls the Guava number; this Expert loads that observation, speaks a short
-briefing, and records the caller's response. It never claims a fall or emergency.
+The Mac camera app writes an OpenAI-described observation to ``runtime``. A
+responder calls the Guava number; this Expert speaks the scene briefing, records
+the acknowledgement, creates the local PDF report, and closes the call.
 """
 
 from __future__ import annotations
@@ -40,10 +40,9 @@ def _incident_brief() -> tuple[str | None, str]:
             "confirmed a person yet, and ask them to check the BeaconCall console."
         )
     return incident.id, (
-        f"Camera {incident.camera_name} detected one person in the {incident.frame_region} "
-        f"of frame at {incident.confidence_percent} percent confidence. The sighting was "
-        f"created at {incident.detected_at_display}. This is presence detection only, not "
-        "a confirmed fall, injury, or emergency."
+        f"{incident.summary} Camera {incident.camera_name} created incident {incident.id} at "
+        f"{incident.detected_at_display}. This is a visual observation, not a confirmed fall, "
+        "injury, or emergency."
     )
 
 
@@ -82,8 +81,8 @@ def on_call_start(call: guava.Call) -> None:
                 choices=["acknowledged", "continue monitoring", "inspect camera feed"],
             ),
             (
-                "Read back the chosen response and remind the caller that presence alone does "
-                "not confirm distress."
+                "Read back the chosen response. If it is acknowledged, complete the task "
+                "immediately so BeaconCall can create the report and close the call."
             ),
         ],
     )
@@ -96,9 +95,8 @@ def on_question(call: guava.Call, question: str) -> str:
     if incident_id is None:
         return brief
     return (
-        f"The latest verified observation is: {brief} BeaconCall stores only the camera "
-        "region, timestamp, confidence, and a local evidence frame; it does not identify "
-        "the person or diagnose their condition."
+        f"The latest verified observation is: {brief} BeaconCall does not identify anyone "
+        "or diagnose their condition."
     )
 
 
@@ -108,14 +106,15 @@ def on_brief_complete(call: guava.Call) -> None:
     response = call.get_field("response") or "acknowledged"
     incident = store.latest()
     if incident is not None:
-        store.record_call_outcome(
+        incident = store.record_call_outcome(
             incident.id,
             call_id=str(call.id),
             operator_name=str(operator_name),
             response=str(response),
         )
+        logger.info("Incident report ready: %s", incident.report_url)
     logger.info("Call %s completed by %s: %s", call.id, operator_name, response)
-    call.hangup("BeaconCall has recorded your response. Stay safe.")
+    call.hangup("Thanks, I'll get it reported to the rescue team.")
 
 
 @agent.on_session_end

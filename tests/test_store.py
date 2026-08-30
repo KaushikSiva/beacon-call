@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from beacon_call.models import BoundingBox
+from beacon_call.models import BoundingBox, SceneAnalysis
 from beacon_call.store import IncidentStore, frame_region
 
 
@@ -23,9 +23,27 @@ def test_frame_region() -> None:
 
 def test_incident_round_trip(tmp_path: Path) -> None:
     store = IncidentStore(tmp_path)
-    incident = store.create(camera_name="MAC-01", confidence=0.91, bbox=box_at(250))
+    incident = store.create(
+        camera_name="MAC-01",
+        confidence=0.91,
+        bbox=box_at(250),
+        detector_people_count=1,
+    )
     assert incident.status == "awaiting_inbound_call"
     assert store.latest() == incident
+
+    analyzed = store.record_scene_analysis(
+        incident.id,
+        analysis=SceneAnalysis(
+            people_count=2,
+            scene_description="Two people are standing together in front of the camera.",
+        ),
+        model="gpt-5.6-luna",
+    )
+    assert analyzed.people_count == 2
+    assert "2 people" in analyzed.summary
+    report_path = tmp_path / "reports" / f"{incident.id}.pdf"
+    assert report_path.read_bytes().startswith(b"%PDF")
 
     updated = store.record_call_outcome(
         incident.id,
@@ -35,6 +53,7 @@ def test_incident_round_trip(tmp_path: Path) -> None:
     )
     assert updated.status == "inspect"
     assert updated.operator_name == "Alex"
+    assert updated.report_url == f"/api/reports/{incident.id}.pdf"
 
 
 def test_reset_keeps_evidence_directory_safe(tmp_path: Path) -> None:

@@ -15,7 +15,13 @@ export type Incident = {
   frame_region: string;
   summary: string;
   status: "awaiting_inbound_call" | "acknowledged" | "monitoring" | "inspect";
+  detector_people_count: number;
+  people_count: number | null;
+  scene_description: string | null;
+  analysis_status: "pending" | "complete" | "failed";
+  analysis_model: string | null;
   evidence_url: string | null;
+  report_url: string | null;
   operator_name: string | null;
   response: string | null;
 };
@@ -34,4 +40,9 @@ export type DetectionResult = {
   required_streak: number;
   created: boolean;
   incident: Incident | null;
+};
+
+export type EvidenceResult = {
+  incident: Incident;
+  analysis_error: string | null;
 };

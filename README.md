@@ -4,15 +4,15 @@
 
 # BeaconCall
 
-### A robot camera sees someone. Guava makes sure a human hears about it.
+### A robot camera sees people. OpenAI describes the scene. Guava makes sure a human hears it.
 
-**BeaconCall turns a robot-camera person sighting into a live Guava voice briefing so an operator can respond quickly.**
+**BeaconCall turns a robot-camera sighting into an OpenAI scene report and a live Guava voice briefing.**
 
 [![macOS](https://img.shields.io/badge/macOS-camera--ready-111?style=flat-square&logo=apple)](#quickstart)
 [![Guava](https://img.shields.io/badge/Guava-inbound_voice-62D84E?style=flat-square)](#guava-is-the-voice-layer)
-[![Computer Vision](https://img.shields.io/badge/vision-COCO--SSD-111?style=flat-square)](#how-it-works)
-[![Tests](https://img.shields.io/badge/tests-10_passing-62D84E?style=flat-square)](#verification)
-[![Privacy](https://img.shields.io/badge/privacy-images_stay_local-111?style=flat-square)](#privacy-and-safety)
+[![Computer Vision](https://img.shields.io/badge/vision-COCO_%2B_OpenAI-111?style=flat-square)](#architecture)
+[![Tests](https://img.shields.io/badge/tests-Python_%2B_TypeScript-62D84E?style=flat-square)](#verification)
+[![Privacy](https://img.shields.io/badge/privacy-one--frame_analysis-111?style=flat-square)](#privacy-and-safety)
 
 [60-second demo](#the-60-second-demo) · [Quickstart](#quickstart) · [Architecture](#architecture) · [Guava integration](docs/GUAVA_INTEGRATION.md) · [Hackathon deck](artifacts/BeaconCall-Guava-Demo.pdf)
 
@@ -22,18 +22,18 @@
 
 ## About
 
-Camera alerts are easy to miss, especially when a robot is scouting away from its operator. BeaconCall confirms a person across three camera frames, prepares a concise observation, and gives that context to a Guava inbound voice agent. The responder calls the Guava number, hears what the robot saw, and records a clear next step through natural conversation.
+Camera alerts are easy to miss, especially when a robot is scouting away from its operator. BeaconCall confirms at least one person across three camera frames, sends one captured frame to OpenAI to count everyone and describe the visible scene, then gives that description to a Guava inbound voice agent. The responder calls the Guava number, acknowledges the report, and receives a graceful rescue-team handoff.
 
 The current project uses a Mac webcam as a stand-in for the robot camera. Later, the same observation endpoint can accept frames from a Unitree G1 without changing the Guava voice workflow.
 
 > [!IMPORTANT]
-> BeaconCall detects **presence only**. It does not identify people or claim that someone fell, is injured, is distressed, or needs emergency assistance.
+> BeaconCall describes **observable details only**. It does not identify people or claim that someone fell, is injured, is distressed, or needs emergency assistance. The generated PDF is local and does not contact real rescue services.
 
 ## What happens
 
-| 01 — See | 02 — Verify | 03 — Speak | 04 — Respond |
+| 01 — Trigger | 02 — Describe | 03 — Speak | 04 — Report |
 |---|---|---|---|
-| The Mac camera detects a person locally. | Three consecutive detections create one incident. | Guava briefs an inbound caller on time, region, and confidence. | The caller chooses **acknowledged**, **monitor**, or **inspect**. |
+| COCO-SSD sees at least one person across three frames. | OpenAI independently counts all visible people and describes the scene. | Guava briefs the inbound caller with the scene description. | Acknowledgement closes the call and updates a small PDF incident report. |
 
 <p align="center">
   <img src="assets/beaconcall-brief-ready.png" alt="BeaconCall interface showing a verified person sighting ready for a Guava inbound call" width="94%" />
@@ -58,7 +58,7 @@ The Expert uses Guava's real inbound primitives:
 - `set_task` creates the briefing and response checklist.
 - `Field` constrains the operator response to three choices.
 - `on_question` answers follow-ups from live incident context.
-- `on_task_complete` records the human decision in the local incident.
+- `on_task_complete` records the acknowledgement, refreshes the PDF, and ends with: **“Thanks, I'll get it reported to the rescue team.”**
 
 Guava Experts connect outward over a persistent WebSocket, so the inbound agent can run on a Mac behind NAT without exposing a local web server or using ngrok. See Guava's [architecture overview](https://goguava.ai/docs/architecture-overview), [inbound example](https://goguava.ai/docs/inbound-form-filling), and [Agent reference](https://goguava.ai/docs/agent).
 
@@ -67,7 +67,7 @@ Guava Experts connect outward over a persistent WebSocket, so the inbound agent 
 BeaconCall intentionally uses Guava's supported inbound path rather than pretending to place an outbound call:
 
 ```text
-person verified → voice brief ready → operator calls Guava → Beacon speaks → response recorded
+person trigger → OpenAI scene analysis → operator calls Guava → acknowledgement → PDF report
 ```
 
 The camera event prepares the call context and activates **Call for briefing**. The human initiates the inbound call.
@@ -76,17 +76,19 @@ The camera event prepares the call context and activates **Call for briefing**. 
 
 ```mermaid
 flowchart LR
-    A[Mac camera now<br/>G1 camera later] --> B[COCO-SSD<br/>person presence]
+    A[Mac camera now<br/>G1 camera later] --> B[COCO-SSD<br/>one-person trigger]
     B --> C{3 detections<br/>within 4 seconds?}
     C -- No --> B
-    C -- Yes --> D[Local incident JSON<br/>+ evidence frame]
-    D --> E[Guava Expert<br/>inbound listener]
+    C -- Yes --> D[One evidence frame]
+    D --> O[OpenAI Responses API<br/>people count + scene text]
+    O --> I[Local incident JSON<br/>+ PDF report]
+    I --> E[Guava Expert<br/>inbound listener]
     F[Responder calls<br/>Guava number] --> E
     E --> G[Spoken briefing<br/>+ structured response]
-    G --> D
+    G --> I
 ```
 
-The system boundary is deliberate: the evidence image remains on the Mac. Guava receives only the camera name, timestamp, frame region, confidence, and presence-only limitation.
+The system boundary is deliberate: one incident JPEG is sent to OpenAI with response storage disabled. The evidence file and PDF remain under the ignored local `runtime/` directory, and Guava receives the resulting text briefing—not the image.
 
 ## Quickstart
 
@@ -97,6 +99,7 @@ The system boundary is deliberate: the evidence image remains on the Mac. Guava 
 - Node.js 22+ and npm
 - [uv](https://docs.astral.sh/uv/)
 - [Guava CLI](https://goguava.ai/docs/quickstart)
+- An OpenAI API key with access to an image-input model
 
 ### 1. Install
 
@@ -118,6 +121,8 @@ Add the API key and purchased Guava number to `.env`:
 ```dotenv
 GUAVA_API_KEY=gva-...
 GUAVA_AGENT_NUMBER=+1...
+OAI_API_KEY=sk-...
+OAI_VISION_MODEL=gpt-5.6-luna
 ```
 
 ### 3. Run
@@ -145,11 +150,11 @@ make agent-webrtc
 ## The 60-second demo
 
 1. Show an empty chair or doorway and the **Scanning / no person** state.
-2. Walk into frame and stand normally for about two seconds.
-3. Show the green bounding box, confidence, frame region, and **Brief ready** state.
+2. Have two people walk into frame and stand normally for about two seconds. One local detection is enough to trigger the next stage.
+3. Show every COCO box it finds, then the OpenAI count, scene description, and **Brief ready** state.
 4. Call the displayed Guava number and ask: **“What did the robot camera see?”**
-5. Answer **“inspect camera feed”** when Beacon asks what to do.
-6. Show the updated incident and the call in Guava Conversations.
+5. Answer **“acknowledged”** and let Beacon close with the rescue-team handoff.
+6. Download the PDF report, then show the updated incident and Guava Conversations.
 
 Full presenter copy: [docs/DEMO.md](docs/DEMO.md)
 
@@ -165,6 +170,7 @@ Content-Type: application/json
   "person_present": true,
   "confidence": 0.91,
   "camera_name": "G1-HEAD-CAM",
+  "local_people_count": 1,
   "bbox": {
     "x": 220,
     "y": 80,
@@ -176,12 +182,14 @@ Content-Type: application/json
 }
 ```
 
-Post three qualifying observations within four seconds. BeaconCall creates the same incident and Guava reads it on the next inbound call.
+Post three qualifying observations within four seconds, then upload the incident JPEG to the evidence endpoint. BeaconCall performs the same OpenAI analysis and Guava reads the description on the next inbound call.
 
 ## Privacy and safety
 
-- Camera inference runs locally in the browser.
-- Evidence frames remain under the ignored `runtime/` directory.
+- COCO-SSD trigger inference runs locally in the browser.
+- One incident frame is sent to OpenAI for people counting and scene description with API response storage disabled.
+- The local evidence copy and generated report remain under the ignored `runtime/` directory.
+- Camera images are not sent to Guava; Guava receives the text briefing.
 - No facial recognition or identity matching is performed.
 - No medical or distress classification is performed.
 - The call repeats that a sighting is not a confirmed emergency.
@@ -195,7 +203,7 @@ make test
 
 Verified on Apple silicon:
 
-- 8 Python tests
+- 11 Python tests
 - 2 TypeScript tests
 - Ruff clean
 - TypeScript strict-mode clean
@@ -207,7 +215,7 @@ Verified on Apple silicon:
 
 ```text
 beacon-call/
-├── beacon_call/          # API, incident store, and detection gate
+├── beacon_call/          # API, OpenAI scene analysis, reports, and detection gate
 ├── web/                  # Camera-first operator console
 ├── main.py               # Guava inbound Expert
 ├── tests/                # Python behavior tests
@@ -221,8 +229,10 @@ beacon-call/
 If this direction is useful, **star the repository** and share the 60-second demo. Stars help prioritize the integrations people actually want:
 
 - [x] Mac camera presence detection
+- [x] OpenAI multi-person count and scene description
 - [x] Guava inbound voice briefing
 - [x] Human response written back to the incident
+- [x] Downloadable PDF incident report
 - [ ] Unitree G1 head-camera adapter
 - [ ] RTSP and recorded-video inputs
 - [ ] Multi-camera incident queue
@@ -247,7 +257,7 @@ Small, demoable pull requests are welcome. Good first contributions include a ne
 
 <div align="center">
 
-### Camera sighting. Guava briefing. Human response.
+### Camera sighting. OpenAI scene report. Guava briefing.
 
 If BeaconCall should become a real G1 integration, give it a ⭐ and tell us what to build next.
 
@@ -259,7 +269,7 @@ Use these values in **Repository → Settings → General**:
 
 **Description**
 
-> Turn robot-camera person sightings into live Guava voice briefings for human operators. Mac-first, G1-ready, and presence-only by design.
+> Turn robot-camera sightings into OpenAI scene reports and live Guava voice briefings. Mac-first and G1-ready.
 
 **Topics**
 
