@@ -19,7 +19,7 @@
 BeaconCall has two incident producers:
 
 - The browser demo confirms a person across three camera frames and asks OpenAI to describe one evidence frame.
-- Everest G1 posts a simulation-grounded proximity event plus one front-camera frame after its controller has stopped beside a downed person. BeaconCall asks OpenAI for an observable description before it dials.
+- Everest G1 posts a simulation-grounded proximity event plus one front-camera frame after its controller has stopped beside a downed person. Upstream, its world model may combine camera, acoustic bearing, and IMU/terrain context for Gemini Robotics-ER 2 route reasoning. BeaconCall asks OpenAI for an observable description before it dials.
 
 Both produce an observable-facts-only incident. A robot request can explicitly queue one outbound call. BeaconCall dispatches its LiveKit agent first, dials the server-configured recipient through a stored Twilio-backed SIP trunk, speaks the report, waits up to 45 seconds for acknowledgment, records the outcome, and deletes the room to end the call.
 
@@ -29,18 +29,38 @@ Both produce an observable-facts-only incident. A robot request can explicitly q
 ## Architecture
 
 ```mermaid
-flowchart LR
-    G[Everest G1 proximity + front-camera frame] -->|Bearer token + idempotency key| A[BeaconCall API]
-    C[Browser camera] --> V[COCO confirmation]
-    V --> O[OpenAI observable scene]
-    O --> A
-    A --> E[OpenAI one-frame description]
-    A --> S[Local incident JSON + PDF]
-    E --> D[LiveKit agent dispatch]
-    D --> P[Twilio-backed outbound SIP]
-    P --> R[Responder]
-    R -->|Acknowledgment| S
+flowchart TB
+    subgraph EVEREST[Everest G1 — onboard/simulation authority]
+      ES[G1 sensors: camera + audio + IMU] --> WM[World model]
+      WM --> GM[AI mission agent: Gemini Robotics-ER 2]
+      GM --> RV[Local hard-safe route validator]
+      RV --> GR[GR00T task policy]
+      GR --> SO[SONIC 50 Hz whole-body decoder]
+      SO --> STOP[G1 motion + local proximity stop]
+    end
+    STOP -->|After stop: Bearer token + idempotency key + one frame| BC[BeaconCall API]
+    CAM[Browser camera] --> COCO[COCO confirmation]
+    COCO --> OBS[OpenAI observable scene]
+    OBS --> BC
+    BC --> DESC[OpenAI one-frame description]
+    BC --> STORE[Local incident JSON + PDF]
+    DESC --> LK[LiveKit agent dispatch]
+    LK --> SIP[Twilio-backed outbound SIP]
+    SIP --> RESP[Responder]
+    RESP -->|Acknowledgment| STORE
 ```
+
+The GR00T/SONIC boxes describe Everest G1's promoted architecture; its current
+runnable commissioning paths remain deterministic until a learned checkpoint
+passes simulation and physical safety gates. Gemini Robotics-ER 2 is a
+higher-level route reasoner, not a joint controller. It can select only from
+locally generated hard-safe candidates.
+
+BeaconCall starts strictly after local motion has stopped. It receives no raw
+microphone stream, acoustic waveform, IMU feed, GR00T token, or SONIC action.
+Acoustic bearing can help Everest choose a route, but geometric proximity alone
+gates the stop and one-shot incident. LiveKit and Twilio never participate in a
+robot control loop.
 
 The destination number is read only from the BeaconCall server environment. It is never accepted from an incident request, returned by the API, written to incident JSON, or logged.
 
@@ -140,6 +160,11 @@ Content-Type: application/json
 ```
 
 The first valid request returns `202` with `duplicate: false`. Repeating the same key returns the existing incident with `duplicate: true` and does not place another call, including after process restart.
+
+Camera, spatial audio, IMU/terrain context, Gemini Robotics-ER 2, GR00T, and
+SONIC remain upstream of this API. BeaconCall deliberately accepts the final
+observable state, measured geometric distance, and at most one bounded JPEG—not
+the sensor streams or motion plan that produced them.
 
 The base spoken report is deterministic:
 

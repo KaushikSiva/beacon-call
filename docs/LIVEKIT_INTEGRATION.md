@@ -12,10 +12,36 @@ BeaconCall uses LiveKit Agents for transcription and speech, and LiveKit SIP to 
 
 The Twilio authentication secret belongs in the LiveKit outbound-trunk configuration, not in this repository or the incident request.
 
+## Everest mission boundary
+
+Everest G1's promoted mission architecture is upstream of BeaconCall:
+
+```text
+G1 camera + acoustic bearing + IMU/terrain
+  -> world model
+  -> Gemini Robotics-ER 2 higher-level route selection
+  -> local hard-safe route validation
+  -> GR00T task policy
+  -> SONIC 50 Hz whole-body control
+  -> local geometric proximity stop
+  -> BeaconCall incident
+```
+
+The current runnable simulator uses a deterministic executor in place of an
+unvalidated GR00T/SONIC checkpoint, but preserves this authority boundary.
+Gemini cannot dial, arm a call, or write joint commands. Acoustic bearing is
+route context only; the coarse acoustic range is telemetry and never satisfies
+proximity.
+
+BeaconCall receives the final observed state, measured geometric distance, and
+an optional bounded JPEG. It does not receive raw audio, IMU samples, the
+world-model packet, Gemini rationale, GR00T tokens, or SONIC commands. LiveKit
+and Twilio therefore remain completely outside robot control.
+
 ## Call sequence
 
 ```text
-Everest proximity latch
+Everest geometric proximity latch after local motion is zero
   -> POST authenticated incident + one JPEG with Idempotency-Key
   -> persist queued incident
   -> OpenAI observable front-camera description (or explicit analysis failure)
