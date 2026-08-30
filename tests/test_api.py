@@ -16,6 +16,37 @@ def setup_api(tmp_path: Path) -> TestClient:
     return TestClient(api.app)
 
 
+def test_health_requires_configured_livekit_worker_readiness(tmp_path: Path, monkeypatch) -> None:
+    client = setup_api(tmp_path)
+    monkeypatch.delenv("BEACON_AGENT_HEALTH_URL", raising=False)
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json()["voice_worker"] == "not_checked"
+
+    class HealthyWorker:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    monkeypatch.setenv("BEACON_AGENT_HEALTH_URL", "http://127.0.0.1:8081/")
+    monkeypatch.setattr(api.urllib.request, "urlopen", lambda *_args, **_kwargs: HealthyWorker())
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json()["voice_worker"] == "ready"
+
+    def unavailable(*_args, **_kwargs):
+        raise OSError("worker unavailable")
+
+    monkeypatch.setattr(api.urllib.request, "urlopen", unavailable)
+    response = client.get("/api/health")
+    assert response.status_code == 503
+    assert response.json() == {"detail": "LiveKit worker is not ready"}
+
+
 def test_observations_create_one_incident_after_three_hits(tmp_path: Path) -> None:
     client = setup_api(tmp_path)
     payload = {

@@ -1,10 +1,11 @@
+import inspect
 from pathlib import Path
 
 import pytest
 
 from beacon_call.store import IncidentStore
 from beacon_call.voice import agent_instructions, incident_brief, is_acknowledgement
-from main import parse_job_metadata
+from main import incident_agent, parse_job_metadata, run_agent
 
 
 def incident(tmp_path: Path):
@@ -46,3 +47,11 @@ def test_job_metadata_validation() -> None:
     )
     with pytest.raises(ValueError):
         parse_job_metadata("{}")
+
+
+def test_production_agent_entrypoint_is_spawn_picklable() -> None:
+    assert incident_agent.__module__ == "main"
+    assert incident_agent.__qualname__ == "incident_agent"
+    source = inspect.getsource(run_agent)
+    assert "num_idle_processes=0" in source
+    assert 'multiprocessing_context="spawn"' in source

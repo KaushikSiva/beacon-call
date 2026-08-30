@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+
+services:
+  - type: web
+    name: beacon-call
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    numInstances: 1
+    maxShutdownDelaySeconds: 180
+    autoDeployTrigger: commit
+    disk:
+      name: beacon-call-data
+      mountPath: /app/runtime
+      sizeGB: 1
+    envVars:
+      - key: BEACON_RUNTIME_DIR
+        value: /app/runtime
+      - key: BEACON_AGENT_HEALTH_URL
+        value: http://127.0.0.1:8081/
+      - key: BEACON_API_TOKEN
+        generateValue: true
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      - key: LIVEKIT_SIP_TRUNK_ID
+        sync: false
+      - key: BEACON_DESTINATION_NUMBER
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OAI_VISION_MODEL
+        value: gpt-5.6-luna

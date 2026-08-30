@@ -10,6 +10,7 @@
 [![Twilio](https://img.shields.io/badge/Twilio-outbound_voice-F22F46?style=flat-square&logo=twilio)](docs/LIVEKIT_INTEGRATION.md)
 [![Computer Vision](https://img.shields.io/badge/vision-COCO_%2B_OpenAI-111?style=flat-square)](#camera-demo)
 [![Safety](https://img.shields.io/badge/calls-explicit_%2B_idempotent-62D84E?style=flat-square)](#call-safety)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/KaushikSiva/beacon-call)
 
 </div>
 
@@ -90,6 +91,25 @@ make agent-dev
 ```
 
 Open <http://127.0.0.1:8080> for the optional camera demo.
+
+## Deploy on Render
+
+The committed [Render Blueprint](render.yaml) deploys one Docker web service
+containing both the FastAPI server and the LiveKit production worker. They share
+one persistent disk so incident idempotency, reports, and voice acknowledgment
+updates survive restarts and remain visible to both processes.
+
+Click **Deploy to Render** above or create a new Blueprint from this repository.
+Render will prompt for the LiveKit Cloud, Twilio-backed SIP trunk, destination,
+and OpenAI values; it generates `BEACON_API_TOKEN` itself. This requires a paid
+service because Render does not support persistent disks on free instances.
+
+After deployment, copy the generated API token from the Render service's
+Environment page and use the service's `https://*.onrender.com` URL as
+`BEACON_API_URL` in Everest G1. No Render API key is required for the normal
+Dashboard/Blueprint flow.
+
+Full instructions: [Render deployment runbook](docs/RENDER_DEPLOY.md).
 
 ## One explicitly armed call
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 
@@ -22,6 +23,9 @@ load_dotenv()
 logger = logging.getLogger("beacon_call.livekit_agent")
 store = IncidentStore.from_environment()
 
+if TYPE_CHECKING:
+    from livekit.agents import JobContext
+
 
 def parse_job_metadata(raw: str) -> dict[str, str]:
     try:
@@ -37,79 +41,90 @@ def parse_job_metadata(raw: str) -> dict[str, str]:
     return {str(key): str(item) for key, item in value.items()}
 
 
-def run_agent() -> None:
-    from livekit.agents import Agent, AgentServer, AgentSession, JobContext, cli
+async def incident_agent(ctx: JobContext) -> None:
+    """Handle one dispatched incident as a module-level, spawn-safe entrypoint."""
+
+    from livekit.agents import Agent, AgentSession
     from livekit.plugins import openai
 
-    server = AgentServer()
+    metadata = parse_job_metadata(ctx.job.metadata)
+    incident_id = metadata["incident_id"]
+    incident = store.get(incident_id)
+    if incident is None:
+        raise RuntimeError(f"Unknown incident: {incident_id}")
 
-    @server.rtc_session(agent_name=AGENT_NAME)
-    async def incident_agent(ctx: JobContext) -> None:
-        metadata = parse_job_metadata(ctx.job.metadata)
-        incident_id = metadata["incident_id"]
-        incident = store.get(incident_id)
-        if incident is None:
-            raise RuntimeError(f"Unknown incident: {incident_id}")
+    await ctx.connect()
+    participant = await asyncio.wait_for(
+        ctx.wait_for_participant(identity=metadata["participant_identity"]),
+        timeout=90,
+    )
+    store.record_call_status(
+        incident_id,
+        status="answered",
+        call_id=getattr(participant, "sid", None) or participant.identity,
+    )
 
-        await ctx.connect()
-        participant = await asyncio.wait_for(
-            ctx.wait_for_participant(identity=metadata["participant_identity"]),
-            timeout=90,
+    session = AgentSession(
+        stt=openai.STT(model="gpt-4o-mini-transcribe", language="en"),
+        tts=openai.TTS(
+            model="gpt-4o-mini-tts",
+            voice="ash",
+            instructions="Speak calmly, clearly, and professionally.",
+        ),
+        allow_interruptions=False,
+    )
+    acknowledged = asyncio.Event()
+
+    @session.on("user_input_transcribed")
+    def on_transcript(event) -> None:  # type: ignore[no-untyped-def]
+        if not bool(getattr(event, "is_final", False)):
+            return
+        transcript = str(getattr(event, "transcript", "") or "").strip()
+        if is_acknowledgement(transcript):
+            acknowledged.set()
+            return
+        asyncio.create_task(
+            session.say(
+                "The only confirmed facts are that this is a simulation, the person is "
+                "motionless in snow, and responsiveness and vital signs are unknown. "
+                "Please acknowledge receipt."
+            )
         )
-        store.record_call_status(
+
+    await session.start(
+        room=ctx.room,
+        agent=Agent(instructions=agent_instructions(incident)),
+    )
+    await session.say(incident_brief(incident), allow_interruptions=False)
+    try:
+        await asyncio.wait_for(acknowledged.wait(), timeout=45)
+    except TimeoutError:
+        store.record_call_status(incident_id, status="timed_out")
+        await session.say(CALL_TIMEOUT, allow_interruptions=False)
+    else:
+        store.record_call_outcome(
             incident_id,
-            status="answered",
-            call_id=getattr(participant, "sid", None) or participant.identity,
+            call_id=incident.call_id or participant.identity,
+            operator_name="phone responder",
+            response="acknowledged",
         )
+        await session.say(CALL_CLOSING, allow_interruptions=False)
+    finally:
+        await ctx.delete_room()
 
-        session = AgentSession(
-            stt=openai.STT(model="gpt-4o-mini-transcribe", language="en"),
-            tts=openai.TTS(
-                model="gpt-4o-mini-tts",
-                voice="ash",
-                instructions="Speak calmly, clearly, and professionally.",
-            ),
-            allow_interruptions=False,
-        )
-        acknowledged = asyncio.Event()
 
-        @session.on("user_input_transcribed")
-        def on_transcript(event) -> None:  # type: ignore[no-untyped-def]
-            if not bool(getattr(event, "is_final", False)):
-                return
-            transcript = str(getattr(event, "transcript", "") or "").strip()
-            if is_acknowledgement(transcript):
-                acknowledged.set()
-                return
-            asyncio.create_task(
-                session.say(
-                    "The only confirmed facts are that this is a simulation, the person is "
-                    "motionless in snow, and responsiveness and vital signs are unknown. "
-                    "Please acknowledge receipt."
-                )
-            )
+def run_agent() -> None:
+    from livekit.agents import AgentServer, cli
 
-        await session.start(
-            room=ctx.room,
-            agent=Agent(instructions=agent_instructions(incident)),
-        )
-        await session.say(incident_brief(incident), allow_interruptions=False)
-        try:
-            await asyncio.wait_for(acknowledged.wait(), timeout=45)
-        except TimeoutError:
-            store.record_call_status(incident_id, status="timed_out")
-            await session.say(CALL_TIMEOUT, allow_interruptions=False)
-        else:
-            store.record_call_outcome(
-                incident_id,
-                call_id=incident.call_id or participant.identity,
-                operator_name="phone responder",
-                response="acknowledged",
-            )
-            await session.say(CALL_CLOSING, allow_interruptions=False)
-        finally:
-            await ctx.delete_room()
-
+    server = AgentServer(
+        # This deployment intentionally handles one incident call at a time.
+        # Spawn on demand so an active call does not cause an extra warm job
+        # process to consume the small Render instance's memory.
+        num_idle_processes=0,
+        drain_timeout=150,
+        multiprocessing_context="spawn",
+    )
+    server.rtc_session(agent_name=AGENT_NAME)(incident_agent)
     cli.run_app(server)
 
 

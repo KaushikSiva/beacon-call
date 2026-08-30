@@ -1,4 +1,4 @@
-.PHONY: setup build run agent-dev agent-console call-test test
+.PHONY: setup build run agent-dev agent-console call-test render-validate render-build test
 
 setup:
 	uv sync --dev
@@ -18,6 +18,13 @@ agent-console:
 
 call-test:
 	uv run python scripts/trigger_call.py --arm-live-call
+
+render-validate:
+	bash -n scripts/render_start.sh
+	uvx check-jsonschema --schemafile https://render.com/schema/render.yaml.json render.yaml
+
+render-build: render-validate
+	docker build -t beacon-call-render:local .
 
 test:
 	uv run ruff check .

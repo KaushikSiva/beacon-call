@@ -232,6 +232,7 @@ version = "0.2.0"
 source = { virtual = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "livekit-agents", extra = ["openai"] },
     { name = "openai" },
     { name = "python-dotenv" },
@@ -242,14 +243,15 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pytest" },
+    { name = "pyyaml" },
     { name = "ruff" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.116,<1" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "livekit-agents", extras = ["openai"], specifier = ">=1.5,<2" },
     { name = "openai", specifier = ">=3.6.0" },
     { name = "python-dotenv", specifier = ">=1.1,<2" },
@@ -260,8 +262,8 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "pytest", specifier = ">=8.4,<9" },
+    { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "ruff", specifier = ">=0.12,<1" },
 ]
 

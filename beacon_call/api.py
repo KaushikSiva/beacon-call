@@ -5,6 +5,9 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
+import os
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -53,7 +56,17 @@ def app_state() -> AppState:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "beacon-call"}
+    agent_health_url = os.environ.get("BEACON_AGENT_HEALTH_URL", "").strip()
+    voice_worker = "not_checked"
+    if agent_health_url:
+        try:
+            with urllib.request.urlopen(agent_health_url, timeout=1.0) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"LiveKit worker health returned {response.status}")
+        except (OSError, RuntimeError, urllib.error.URLError) as exc:
+            raise HTTPException(status_code=503, detail="LiveKit worker is not ready") from exc
+        voice_worker = "ready"
+    return {"status": "ok", "service": "beacon-call", "voice_worker": voice_worker}
 
 
 @app.get("/api/state", response_model=AppState)

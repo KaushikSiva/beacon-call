@@ -5,6 +5,7 @@ requires-python = ">=3.11"
 description = "Robot-camera incidents with LiveKit and Twilio outbound voice acknowledgment"
 dependencies = [
   "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
   "livekit-agents[openai]>=1.5,<2",
   "openai>=3.6.0",
   "python-dotenv>=1.1,<2",
@@ -15,7 +16,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-  "httpx>=0.28,<1",
+  "pyyaml>=6.0,<7",
   "pytest>=8.4,<9",
   "ruff>=0.12,<1",
 ]
