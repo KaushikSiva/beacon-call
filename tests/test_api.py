@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from beacon_call import api
 from beacon_call.livekit_service import CallPlacement
 from beacon_call.models import SceneAnalysis
+from beacon_call.scene import SceneAnalysisError
 from beacon_call.store import IncidentStore
 from beacon_call.vision_gate import PresenceGate
 
@@ -157,3 +158,94 @@ def test_outbound_call_dispatches_once_and_hides_destination(tmp_path: Path, mon
     assert len(calls) == 1
     assert "phone" not in first.text.lower()
     assert api.store.latest().status == "answered"
+
+
+def test_outbound_call_analyzes_front_camera_before_livekit_dispatch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = setup_api(tmp_path)
+    monkeypatch.setenv("BEACON_API_TOKEN", "test-secret")
+    dispatched = []
+
+    def fake_analyze(_: bytes) -> tuple[SceneAnalysis, str]:
+        return (
+            SceneAnalysis(
+                people_count=1,
+                scene_description=("One person is lying on a snowy surface in front of the robot."),
+            ),
+            "gpt-5.6-luna",
+        )
+
+    async def fake_place(incident):
+        dispatched.append(incident)
+        return CallPlacement(
+            room_name=f"beacon-{incident.id.lower()}",
+            participant_identity="responder-camera-test",
+            participant_id="PA_camera_test",
+        )
+
+    monkeypatch.setattr(api, "analyze_scene", fake_analyze)
+    monkeypatch.setattr(api, "place_incident_call", fake_place)
+    jpeg = base64.b64encode(b"\xff\xd8front-camera-frame\xff\xd9").decode()
+    response = client.post(
+        "/api/incidents/outbound-call",
+        headers={
+            "Authorization": "Bearer test-secret",
+            "Idempotency-Key": "episode-camera-001",
+        },
+        json={
+            "simulation_id": "everest-camera-001",
+            "distance_m": 0.55,
+            "camera_name": "G1-FRONT-CAMERA",
+            "image_data_url": f"data:image/jpeg;base64,{jpeg}",
+        },
+    )
+
+    assert response.status_code == 202
+    incident = response.json()["incident"]
+    assert incident["analysis_status"] == "complete"
+    assert incident["analysis_model"] == "gpt-5.6-luna"
+    assert incident["evidence_url"].endswith(".jpg")
+    assert incident["scene_description"].startswith("One person is lying")
+    assert len(dispatched) == 1
+    assert dispatched[0].scene_description == incident["scene_description"]
+
+
+def test_outbound_call_keeps_base_brief_when_camera_analysis_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = setup_api(tmp_path)
+    monkeypatch.setenv("BEACON_API_TOKEN", "test-secret")
+    dispatched = []
+
+    def unavailable_analysis(_: bytes):
+        raise SceneAnalysisError("vision unavailable")
+
+    async def fake_place(incident):
+        dispatched.append(incident)
+        return CallPlacement(
+            room_name=f"beacon-{incident.id.lower()}",
+            participant_identity="responder-camera-fallback",
+            participant_id="PA_camera_fallback",
+        )
+
+    monkeypatch.setattr(api, "analyze_scene", unavailable_analysis)
+    monkeypatch.setattr(api, "place_incident_call", fake_place)
+    jpeg = base64.b64encode(b"\xff\xd8front-camera-frame\xff\xd9").decode()
+    response = client.post(
+        "/api/incidents/outbound-call",
+        headers={
+            "Authorization": "Bearer test-secret",
+            "Idempotency-Key": "episode-camera-fallback-001",
+        },
+        json={
+            "simulation_id": "everest-camera-fallback-001",
+            "distance_m": 0.60,
+            "image_data_url": f"data:image/jpeg;base64,{jpeg}",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["incident"]["analysis_status"] == "failed"
+    assert len(dispatched) == 1
+    assert dispatched[0].scene_description is None

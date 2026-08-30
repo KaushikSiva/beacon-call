@@ -16,8 +16,9 @@ The Twilio authentication secret belongs in the LiveKit outbound-trunk configura
 
 ```text
 Everest proximity latch
-  -> POST authenticated incident with Idempotency-Key
+  -> POST authenticated incident + one JPEG with Idempotency-Key
   -> persist queued incident
+  -> OpenAI observable front-camera description (or explicit analysis failure)
   -> dispatch beacon-incident-agent
   -> create SIP participant with wait_until_answered
   -> agent waits for the named participant
@@ -26,6 +27,12 @@ Everest proximity latch
   -> persist outcome and PDF
   -> delete LiveKit room to disconnect the call
 ```
+
+The vision step completes before agent dispatch, so the first spoken briefing
+can append the front-camera description to the existing deterministic alert.
+The description is treated as quoted, untrusted data and cannot alter the
+agent's instructions. The JPEG remains in BeaconCall evidence storage and is
+not sent to LiveKit or Twilio.
 
 ## Commissioning
 

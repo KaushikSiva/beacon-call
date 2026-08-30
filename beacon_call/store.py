@@ -84,6 +84,7 @@ class IncidentStore:
         observed_state: str,
         distance_m: float,
         camera_name: str,
+        evidence_expected: bool = False,
     ) -> tuple[Incident, bool]:
         """Create one incident per idempotency key, including across restarts."""
 
@@ -100,17 +101,25 @@ class IncidentStore:
                 frame_region="robot proximity envelope",
                 summary=(
                     "Everest G1 reached a motionless adult lying in snow. "
-                    "Responsiveness and vital signs are unknown."
+                    + (
+                        "Front-camera OpenAI scene analysis is pending."
+                        if evidence_expected
+                        else "Responsiveness and vital signs are unknown."
+                    )
                 ),
                 status="queued",
                 detector_people_count=1,
-                people_count=1,
+                people_count=None if evidence_expected else 1,
                 scene_description=(
-                    "One motionless adult is lying in snow within the robot's bounded "
-                    "proximity envelope. Responsiveness and vital signs are unknown."
+                    None
+                    if evidence_expected
+                    else (
+                        "One motionless adult is lying in snow within the robot's bounded "
+                        "proximity envelope. Responsiveness and vital signs are unknown."
+                    )
                 ),
-                analysis_status="complete",
-                analysis_model="simulation-ground-truth",
+                analysis_status="pending" if evidence_expected else "complete",
+                analysis_model=None if evidence_expected else "simulation-ground-truth",
                 simulation_id=simulation_id,
                 observed_state=observed_state,
                 distance_m=distance_m,

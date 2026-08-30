@@ -19,7 +19,7 @@
 BeaconCall has two incident producers:
 
 - The browser demo confirms a person across three camera frames and asks OpenAI to describe one evidence frame.
-- Everest G1 posts a simulation-grounded proximity event after its controller has stopped beside a downed person.
+- Everest G1 posts a simulation-grounded proximity event plus one front-camera frame after its controller has stopped beside a downed person. BeaconCall asks OpenAI for an observable description before it dials.
 
 Both produce an observable-facts-only incident. A robot request can explicitly queue one outbound call. BeaconCall dispatches its LiveKit agent first, dials the server-configured recipient through a stored Twilio-backed SIP trunk, speaks the report, waits up to 45 seconds for acknowledgment, records the outcome, and deletes the room to end the call.
 
@@ -30,12 +30,13 @@ Both produce an observable-facts-only incident. A robot request can explicitly q
 
 ```mermaid
 flowchart LR
-    G[Everest G1 proximity latch] -->|Bearer token + idempotency key| A[BeaconCall API]
+    G[Everest G1 proximity + front-camera frame] -->|Bearer token + idempotency key| A[BeaconCall API]
     C[Browser camera] --> V[COCO confirmation]
     V --> O[OpenAI observable scene]
     O --> A
+    A --> E[OpenAI one-frame description]
     A --> S[Local incident JSON + PDF]
-    A --> D[LiveKit agent dispatch]
+    E --> D[LiveKit agent dispatch]
     D --> P[Twilio-backed outbound SIP]
     P --> R[Responder]
     R -->|Acknowledgment| S
@@ -133,15 +134,22 @@ Content-Type: application/json
   "simulation_id": "everest-episode-0001",
   "observed_state": "motionless_adult_in_snow",
   "distance_m": 0.12,
-  "camera_name": "G1-HEAD-CAM"
+  "camera_name": "G1-FRONT-CAMERA",
+  "image_data_url": "data:image/jpeg;base64,<one-bounded-frame>"
 }
 ```
 
 The first valid request returns `202` with `duplicate: false`. Repeating the same key returns the existing incident with `duplicate: true` and does not place another call, including after process restart.
 
-The spoken report is deterministic:
+The base spoken report is deterministic:
 
 > This is an automated Everest G1 simulation alert, not a real-world emergency. The robot reached a motionless adult lying in snow. Responsiveness and vital signs are unknown. The nearest measured distance is [distance] meters. Please acknowledge receipt.
+
+When the request contains a valid JPEG, BeaconCall analyzes it before LiveKit
+dispatch and appends: `OpenAI analysis of the robot's front-camera frame
+reports: [observable description]. This is a visual description, not a medical
+assessment.` If analysis fails, the base report still places the call without
+inventing visual facts.
 
 ## Camera demo
 
@@ -188,7 +196,7 @@ runtime/                  ignored evidence, incident JSON, and PDF reports
 ## Privacy
 
 - No facial recognition or identity matching.
-- One camera frame is sent to OpenAI only when the browser evidence workflow is used.
+- One camera frame is sent to OpenAI when the browser evidence workflow or an authenticated robot incident supplies it.
 - Camera images are not sent to LiveKit or Twilio.
 - Secrets and the recipient number are excluded from Git.
 - Incident logs contain the simulation ID, distance, call state, and acknowledgment—not credentials or the destination.

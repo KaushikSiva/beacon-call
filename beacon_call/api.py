@@ -15,6 +15,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAIError
+from starlette.concurrency import run_in_threadpool
 
 from beacon_call.auth import require_api_token
 from beacon_call.livekit_service import place_incident_call
@@ -23,6 +24,7 @@ from beacon_call.models import (
     DetectionResult,
     EvidencePayload,
     EvidenceResult,
+    Incident,
     Observation,
     OutboundIncidentRequest,
     OutboundIncidentResponse,
@@ -133,14 +135,26 @@ async def outbound_incident_call(
             status_code=400,
             detail="Idempotency-Key must contain between 8 and 200 characters",
         )
+    jpeg_bytes = (
+        _decode_jpeg_data_url(payload.image_data_url)
+        if payload.image_data_url is not None
+        else None
+    )
     incident, duplicate = store.create_outbound(
         idempotency_key=idempotency_key,
         simulation_id=payload.simulation_id,
         observed_state=payload.observed_state,
         distance_m=payload.distance_m,
         camera_name=payload.camera_name,
+        evidence_expected=jpeg_bytes is not None,
     )
     if not duplicate:
+        if jpeg_bytes is not None:
+            incident, _ = await run_in_threadpool(
+                _attach_and_analyze_evidence,
+                incident.id,
+                jpeg_bytes,
+            )
         background_tasks.add_task(_run_outbound_call, incident.id)
     return OutboundIncidentResponse(
         incident=incident.model_copy(update={"idempotency_digest": None}),
@@ -148,17 +162,24 @@ async def outbound_incident_call(
     )
 
 
-@app.post("/api/incidents/{incident_id}/evidence", response_model=EvidenceResult)
-def attach_evidence(incident_id: str, payload: EvidencePayload) -> EvidenceResult:
+def _decode_jpeg_data_url(image_data_url: str) -> bytes:
     prefix = "data:image/jpeg;base64,"
-    if not payload.image_data_url.startswith(prefix):
+    if not image_data_url.startswith(prefix):
         raise HTTPException(status_code=400, detail="Expected a JPEG data URL")
     try:
-        jpeg_bytes = base64.b64decode(payload.image_data_url[len(prefix) :], validate=True)
+        jpeg_bytes = base64.b64decode(image_data_url[len(prefix) :], validate=True)
     except (binascii.Error, ValueError) as exc:
         raise HTTPException(status_code=400, detail="Invalid base64 image") from exc
     if len(jpeg_bytes) > 2_000_000:
         raise HTTPException(status_code=413, detail="Evidence frame exceeds 2 MB")
+    if not jpeg_bytes.startswith(b"\xff\xd8") or not jpeg_bytes.endswith(b"\xff\xd9"):
+        raise HTTPException(status_code=400, detail="Evidence frame is not a JPEG")
+    return jpeg_bytes
+
+
+def _attach_and_analyze_evidence(
+    incident_id: str, jpeg_bytes: bytes
+) -> tuple[Incident, str | None]:
     try:
         incident = store.attach_evidence(incident_id, jpeg_bytes)
     except KeyError as exc:
@@ -176,6 +197,13 @@ def attach_evidence(incident_id: str, payload: EvidencePayload) -> EvidenceResul
         logger.warning("OpenAI scene analysis failed: %s", type(exc).__name__)
         incident = store.record_analysis_failure(incident_id)
         analysis_error = "OpenAI scene analysis failed; check the API key and model access"
+    return incident, analysis_error
+
+
+@app.post("/api/incidents/{incident_id}/evidence", response_model=EvidenceResult)
+def attach_evidence(incident_id: str, payload: EvidencePayload) -> EvidenceResult:
+    jpeg_bytes = _decode_jpeg_data_url(payload.image_data_url)
+    incident, analysis_error = _attach_and_analyze_evidence(incident_id, jpeg_bytes)
     return EvidenceResult(incident=incident, analysis_error=analysis_error)
 
 

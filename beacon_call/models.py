@@ -105,7 +105,8 @@ class OutboundIncidentRequest(BaseModel):
     simulation_id: str = Field(min_length=1, max_length=80)
     observed_state: Literal["motionless_adult_in_snow"] = "motionless_adult_in_snow"
     distance_m: float = Field(ge=0, le=10)
-    camera_name: str = Field(default="G1-HEAD-CAM", min_length=1, max_length=40)
+    camera_name: str = Field(default="G1-FRONT-CAMERA", min_length=1, max_length=40)
+    image_data_url: str | None = Field(default=None, min_length=20, max_length=3_000_000)
 
 
 class OutboundIncidentResponse(BaseModel):
