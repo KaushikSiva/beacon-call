@@ -29,7 +29,10 @@ class PresenceGate:
             self._hits.clear()
             return False
 
-        if self._last_created is not None and timestamp - self._last_created < self.cooldown_seconds:
+        if (
+            self._last_created is not None
+            and timestamp - self._last_created < self.cooldown_seconds
+        ):
             self._hits.clear()
             return False
 

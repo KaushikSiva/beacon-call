@@ -125,7 +125,7 @@ h1 { margin: 0; font-size: clamp(28px, 3vw, 48px); line-height: 1; letter-spacin
 .incident-facts dd { margin: 8px 0 0; font-size: 11px; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
 
 .call-block { padding: 24px 0 17px; }
-.guava-wordmark { display: block; color: var(--accent); font-family: "Manrope", sans-serif; font-size: 25px; font-weight: 800; letter-spacing: -.06em; }
+.voice-wordmark { display: block; color: var(--accent); font-family: "Manrope", sans-serif; font-size: 25px; font-weight: 800; letter-spacing: -.06em; }
 .call-block p { min-height: 42px; margin: 8px 0 15px; color: var(--muted); font-family: "Manrope", sans-serif; font-size: 11px; line-height: 1.55; }
 .call-button { display: flex; align-items: center; justify-content: space-between; padding: 14px 15px; text-decoration: none; }
 .call-button b { font-size: 16px; }

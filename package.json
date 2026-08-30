@@ -8,8 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "deck": "uv run python scripts/create_deck.py"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tensorflow-models/coco-ssd": "2.2.3",

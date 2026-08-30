@@ -5,21 +5,24 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
-import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAIError
 
+from beacon_call.auth import require_api_token
+from beacon_call.livekit_service import place_incident_call
 from beacon_call.models import (
     AppState,
     DetectionResult,
     EvidencePayload,
     EvidenceResult,
     Observation,
+    OutboundIncidentRequest,
+    OutboundIncidentResponse,
 )
 from beacon_call.scene import SceneAnalysisError, analyze_scene
 from beacon_call.store import IncidentStore
@@ -34,8 +37,8 @@ gate = PresenceGate()
 
 app = FastAPI(
     title="BeaconCall",
-    description="Presence-only camera events for a Guava inbound voice briefing.",
-    version="0.1.0",
+    description="Robot-camera incidents with LiveKit and Twilio outbound voice acknowledgment.",
+    version="0.2.0",
 )
 
 
@@ -44,7 +47,7 @@ def app_state() -> AppState:
         incident=store.latest(),
         streak=gate.streak,
         required_streak=gate.required_hits,
-        phone_number=os.environ.get("GUAVA_AGENT_NUMBER"),
+        phone_number=None,
     )
 
 
@@ -77,6 +80,58 @@ def observe(observation: Observation) -> DetectionResult:
         required_streak=gate.required_hits,
         created=created,
         incident=incident,
+    )
+
+
+async def _run_outbound_call(incident_id: str) -> None:
+    try:
+        incident = store.record_call_status(incident_id, status="dialing")
+        placement = await place_incident_call(incident)
+        store.record_call_status(
+            incident_id,
+            status="answered",
+            call_id=placement.participant_id or placement.room_name,
+        )
+    except Exception as exc:
+        logger.exception("Outbound call failed for incident %s", incident_id)
+        try:
+            store.record_call_status(
+                incident_id,
+                status="failed",
+                error=f"{type(exc).__name__}: outbound call failed",
+            )
+        except Exception:
+            logger.exception("Could not persist outbound failure for %s", incident_id)
+
+
+@app.post(
+    "/api/incidents/outbound-call",
+    response_model=OutboundIncidentResponse,
+    status_code=202,
+    dependencies=[Depends(require_api_token)],
+)
+async def outbound_incident_call(
+    payload: OutboundIncidentRequest,
+    background_tasks: BackgroundTasks,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> OutboundIncidentResponse:
+    if not idempotency_key or not (8 <= len(idempotency_key) <= 200):
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key must contain between 8 and 200 characters",
+        )
+    incident, duplicate = store.create_outbound(
+        idempotency_key=idempotency_key,
+        simulation_id=payload.simulation_id,
+        observed_state=payload.observed_state,
+        distance_m=payload.distance_m,
+        camera_name=payload.camera_name,
+    )
+    if not duplicate:
+        background_tasks.add_task(_run_outbound_call, incident.id)
+    return OutboundIncidentResponse(
+        incident=incident.model_copy(update={"idempotency_digest": None}),
+        duplicate=duplicate,
     )
 
 

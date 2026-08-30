@@ -86,7 +86,7 @@ def generate_incident_report(incident: Incident, output_path: Path) -> Path:
     )
 
     scene = incident.scene_description or "Scene analysis was not available."
-    outcome = incident.response or "Awaiting inbound acknowledgement."
+    outcome = incident.response or "Awaiting outbound acknowledgment."
     operator = incident.operator_name or "Not yet recorded"
     story = [
         Paragraph("BEACONCALL", label),

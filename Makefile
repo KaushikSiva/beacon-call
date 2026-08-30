@@ -1,4 +1,4 @@
-.PHONY: setup build run agent-phone agent-webrtc agent-chat test deck
+.PHONY: setup build run agent-dev agent-console call-test test
 
 setup:
 	uv sync --dev
@@ -10,14 +10,14 @@ build:
 run: build
 	uv run uvicorn beacon_call.api:app --host 127.0.0.1 --port 8080
 
-agent-phone:
-	guava run . -- --phone
+agent-dev:
+	uv run python main.py dev
 
-agent-webrtc:
-	guava run . -- --webrtc
+agent-console:
+	uv run python main.py console
 
-agent-chat:
-	guava run . -- --chat
+call-test:
+	uv run python scripts/trigger_call.py --arm-live-call
 
 test:
 	uv run ruff check .
@@ -25,6 +25,3 @@ test:
 	npm test
 	npm run typecheck
 	npm run build
-
-deck:
-	npm run deck

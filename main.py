@@ -1,162 +1,118 @@
-"""BeaconCall's Guava inbound voice Expert.
-
-The Mac camera app writes an OpenAI-described observation to ``runtime``. A
-responder calls the Guava number; this Expert speaks the scene briefing, records
-the acknowledgement, creates the local PDF report, and closes the call.
-"""
+"""BeaconCall LiveKit worker for one bounded outbound incident call."""
 
 from __future__ import annotations
 
-import argparse
+import asyncio
+import json
 import logging
-import os
 
-import guava
 from dotenv import load_dotenv
-from guava import logging_utils
-from guava.events import BotSessionEnded
 
+from beacon_call.livekit_service import AGENT_NAME
 from beacon_call.store import IncidentStore
-
-load_dotenv()
-logger = logging.getLogger("beacon_call.guava")
-store = IncidentStore.from_environment()
-CALL_CLOSING = "Thanks, I'll get it reported to the rescue team."
-
-agent = guava.Agent(
-    name="Beacon",
-    organization="BeaconCall Rescue Lab",
-    purpose=(
-        "Brief inbound rescue operators on the latest verified person sighting "
-        "from a robot camera, clearly state its limitations, and record a response."
-    ),
+from beacon_call.voice import (
+    CALL_CLOSING,
+    CALL_TIMEOUT,
+    agent_instructions,
+    incident_brief,
+    is_acknowledgement,
 )
 
+load_dotenv()
+logger = logging.getLogger("beacon_call.livekit_agent")
+store = IncidentStore.from_environment()
 
-def _incident_brief() -> tuple[str | None, str]:
-    incident = store.latest()
-    if incident is None:
-        return None, (
-            "There is no active camera sighting. Tell the caller the camera has not "
-            "confirmed a person yet, and ask them to check the BeaconCall console."
+
+def parse_job_metadata(raw: str) -> dict[str, str]:
+    try:
+        value = json.loads(raw or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError("LiveKit job metadata is not valid JSON") from exc
+    if not isinstance(value, dict):
+        raise TypeError("LiveKit job metadata must be an object")
+    required = ("incident_id", "participant_identity")
+    missing = [name for name in required if not str(value.get(name, "")).strip()]
+    if missing:
+        raise ValueError(f"LiveKit job metadata is missing: {', '.join(missing)}")
+    return {str(key): str(item) for key, item in value.items()}
+
+
+def run_agent() -> None:
+    from livekit.agents import Agent, AgentServer, AgentSession, JobContext, cli
+    from livekit.plugins import openai
+
+    server = AgentServer()
+
+    @server.rtc_session(agent_name=AGENT_NAME)
+    async def incident_agent(ctx: JobContext) -> None:
+        metadata = parse_job_metadata(ctx.job.metadata)
+        incident_id = metadata["incident_id"]
+        incident = store.get(incident_id)
+        if incident is None:
+            raise RuntimeError(f"Unknown incident: {incident_id}")
+
+        await ctx.connect()
+        participant = await asyncio.wait_for(
+            ctx.wait_for_participant(identity=metadata["participant_identity"]),
+            timeout=90,
         )
-    if (
-        incident.analysis_status == "complete"
-        and incident.people_count is not None
-        and incident.scene_description
-    ):
-        noun = "person" if incident.people_count == 1 else "people"
-        return incident.id, (
-            f"{incident.people_count} {noun} seen. Brief ready. OpenAI vision counted "
-            f"{incident.people_count} {noun}. {incident.scene_description} Observable scene "
-            f"only; condition unknown. Camera {incident.camera_name} created incident "
-            f"{incident.id} at {incident.detected_at_display}."
+        store.record_call_status(
+            incident_id,
+            status="answered",
+            call_id=getattr(participant, "sid", None) or participant.identity,
         )
-    return incident.id, (
-        f"Incident {incident.id} is confirmed, but the OpenAI scene description is not ready. "
-        "Please check the BeaconCall console and call again when it says Brief ready."
-    )
 
-
-@agent.on_call_received
-def on_call_received(call_info: guava.CallInfo) -> guava.IncomingCallAction:
-    logger.info("Inbound call received: %s", call_info)
-    return guava.AcceptCall()
-
-
-@agent.on_call_start
-def on_call_start(call: guava.Call) -> None:
-    incident_id, brief = _incident_brief()
-    logger.info("Call %s briefing incident %s", call.id, incident_id or "none")
-    call.read_script(f"BeaconCall camera update. {brief}")
-    call.set_task(
-        "camera_sighting_brief",
-        objective=(
-            "You are Beacon, the calm voice layer for a robot-camera console. "
-            "The exact camera update has already been read aloud. Do not skip directly to "
-            "acknowledgement before that script finishes. "
-            "Keep the call under one minute unless the caller asks questions."
-        ),
-        checklist=[
-            guava.Field(
-                key="operator_name",
-                field_type="text",
-                question="Who is acknowledging this camera update?",
-                required=False,
+        session = AgentSession(
+            stt=openai.STT(model="gpt-4o-mini-transcribe", language="en"),
+            tts=openai.TTS(
+                model="gpt-4o-mini-tts",
+                voice="ash",
+                instructions="Speak calmly, clearly, and professionally.",
             ),
-            guava.Field(
-                key="response",
-                field_type="multiple_choice",
-                question=(
-                    "Should I mark this as acknowledged, continue monitoring, or ask someone "
-                    "to inspect the camera feed?"
-                ),
-                choices=["acknowledged", "continue monitoring", "inspect camera feed"],
-            ),
-            (
-                "Read back the chosen response. If it is acknowledged, complete the task "
-                "immediately so BeaconCall can create the report and close the call."
-            ),
-        ],
-    )
-
-
-@agent.on_question
-def on_question(call: guava.Call, question: str) -> str:
-    incident_id, brief = _incident_brief()
-    logger.info("Question on call %s: %s", call.id, question)
-    if incident_id is None:
-        return brief
-    return (
-        f"The latest verified observation is: {brief} BeaconCall does not identify anyone "
-        "or diagnose their condition."
-    )
-
-
-@agent.on_task_complete("camera_sighting_brief")
-def on_brief_complete(call: guava.Call) -> None:
-    operator_name = call.get_field("operator_name") or "unnamed operator"
-    response = call.get_field("response") or "acknowledged"
-    incident = store.latest()
-    if incident is not None:
-        incident = store.record_call_outcome(
-            incident.id,
-            call_id=str(call.id),
-            operator_name=str(operator_name),
-            response=str(response),
+            allow_interruptions=False,
         )
-        logger.info("Incident report ready: %s", incident.report_url)
-    logger.info("Call %s completed by %s: %s", call.id, operator_name, response)
-    call.read_script(CALL_CLOSING)
-    call.hangup()
+        acknowledged = asyncio.Event()
 
+        @session.on("user_input_transcribed")
+        def on_transcript(event) -> None:  # type: ignore[no-untyped-def]
+            if not bool(getattr(event, "is_final", False)):
+                return
+            transcript = str(getattr(event, "transcript", "") or "").strip()
+            if is_acknowledgement(transcript):
+                acknowledged.set()
+                return
+            asyncio.create_task(
+                session.say(
+                    "The only confirmed facts are that this is a simulation, the person is "
+                    "motionless in snow, and responsiveness and vital signs are unknown. "
+                    "Please acknowledge receipt."
+                )
+            )
 
-@agent.on_session_end
-def on_session_end(call: guava.Call, event: BotSessionEnded) -> None:
-    logger.info("Session %s ended: %s", call.id, event.termination_reason)
+        await session.start(
+            room=ctx.room,
+            agent=Agent(instructions=agent_instructions(incident)),
+        )
+        await session.say(incident_brief(incident), allow_interruptions=False)
+        try:
+            await asyncio.wait_for(acknowledged.wait(), timeout=45)
+        except TimeoutError:
+            store.record_call_status(incident_id, status="timed_out")
+            await session.say(CALL_TIMEOUT, allow_interruptions=False)
+        else:
+            store.record_call_outcome(
+                incident_id,
+                call_id=incident.call_id or participant.identity,
+                operator_name="phone responder",
+                response="acknowledged",
+            )
+            await session.say(CALL_CLOSING, allow_interruptions=False)
+        finally:
+            await ctx.delete_room()
 
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the BeaconCall Guava Expert")
-    channel = parser.add_mutually_exclusive_group(required=True)
-    channel.add_argument("--phone", action="store_true", help="Receive inbound phone calls")
-    channel.add_argument("--webrtc", action="store_true", help="Receive inbound browser calls")
-    channel.add_argument("--local", action="store_true", help="Test with Mac microphone/speakers")
-    channel.add_argument("--chat", action="store_true", help="Test in terminal text chat")
-    return parser.parse_args()
+    cli.run_app(server)
 
 
 if __name__ == "__main__":
-    logging_utils.configure_logging()
-    args = parse_args()
-    if args.phone:
-        number = os.environ.get("GUAVA_AGENT_NUMBER")
-        if not number:
-            raise SystemExit("Set GUAVA_AGENT_NUMBER in .env before using --phone")
-        agent.listen_phone(number)
-    elif args.webrtc:
-        agent.listen_webrtc()
-    elif args.chat:
-        agent.chat()
-    else:
-        agent.call_local()
+    logging.basicConfig(level=logging.INFO)
+    run_agent()

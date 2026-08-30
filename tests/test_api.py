@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from beacon_call import api
+from beacon_call.livekit_service import CallPlacement
 from beacon_call.models import SceneAnalysis
 from beacon_call.store import IncidentStore
 from beacon_call.vision_gate import PresenceGate
@@ -46,9 +47,7 @@ def test_reset_clears_incident(tmp_path: Path) -> None:
     assert response.json()["incident"] is None
 
 
-def test_evidence_runs_openai_scene_analysis_and_creates_pdf(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_evidence_runs_openai_scene_analysis_and_creates_pdf(tmp_path: Path, monkeypatch) -> None:
     client = setup_api(tmp_path)
     incident = api.store.create(
         camera_name="MAC-01",
@@ -81,3 +80,49 @@ def test_evidence_runs_openai_scene_analysis_and_creates_pdf(
     assert report.status_code == 200
     assert report.headers["content-type"] == "application/pdf"
     assert report.content.startswith(b"%PDF")
+
+
+def test_outbound_call_requires_authentication(tmp_path: Path, monkeypatch) -> None:
+    client = setup_api(tmp_path)
+    monkeypatch.setenv("BEACON_API_TOKEN", "test-secret")
+    response = client.post(
+        "/api/incidents/outbound-call",
+        headers={"Idempotency-Key": "episode-001"},
+        json={"simulation_id": "sim-001", "distance_m": 0.4},
+    )
+    assert response.status_code == 401
+
+
+def test_outbound_call_dispatches_once_and_hides_destination(tmp_path: Path, monkeypatch) -> None:
+    client = setup_api(tmp_path)
+    monkeypatch.setenv("BEACON_API_TOKEN", "test-secret")
+    calls: list[str] = []
+
+    async def fake_place(incident):
+        calls.append(incident.id)
+        return CallPlacement(
+            room_name=f"beacon-{incident.id.lower()}",
+            participant_identity="responder-test",
+            participant_id="PA_test",
+        )
+
+    monkeypatch.setattr(api, "place_incident_call", fake_place)
+    headers = {
+        "Authorization": "Bearer test-secret",
+        "Idempotency-Key": "episode-everest-001",
+    }
+    body = {
+        "simulation_id": "everest-001",
+        "observed_state": "motionless_adult_in_snow",
+        "distance_m": 0.43,
+    }
+    first = client.post("/api/incidents/outbound-call", headers=headers, json=body)
+    second = client.post("/api/incidents/outbound-call", headers=headers, json=body)
+
+    assert first.status_code == 202
+    assert first.json()["duplicate"] is False
+    assert second.status_code == 202
+    assert second.json()["duplicate"] is True
+    assert len(calls) == 1
+    assert "phone" not in first.text.lower()
+    assert api.store.latest().status == "answered"

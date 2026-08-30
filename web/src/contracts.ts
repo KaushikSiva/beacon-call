@@ -14,7 +14,16 @@ export type Incident = {
   confidence: number;
   frame_region: string;
   summary: string;
-  status: "awaiting_inbound_call" | "acknowledged" | "monitoring" | "inspect";
+  status:
+    | "briefing_ready"
+    | "queued"
+    | "dialing"
+    | "answered"
+    | "acknowledged"
+    | "monitoring"
+    | "inspect"
+    | "failed"
+    | "timed_out";
   detector_people_count: number;
   people_count: number | null;
   scene_description: string | null;
@@ -24,6 +33,10 @@ export type Incident = {
   report_url: string | null;
   operator_name: string | null;
   response: string | null;
+  simulation_id: string | null;
+  observed_state: string | null;
+  distance_m: number | null;
+  call_error: string | null;
 };
 
 export type AppState = {

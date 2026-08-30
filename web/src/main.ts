@@ -40,12 +40,11 @@ let model: ObjectDetection | null = null;
 let stream: MediaStream | null = null;
 let inferenceRunning = false;
 let lastInference = 0;
-let currentPhone: string | null = null;
 let currentIncidentId: string | null = null;
 const inferenceIntervalMs = 520;
 
-function setFlow(step: "camera" | "vision" | "incident" | "guava"): void {
-  const order = ["camera", "vision", "incident", "guava"];
+function setFlow(step: "camera" | "vision" | "incident" | "livekit"): void {
+  const order = ["camera", "vision", "incident", "livekit"];
   const active = order.indexOf(step);
   document.querySelectorAll<HTMLElement>(".flow-step").forEach((node) => {
     node.classList.toggle("is-active", order.indexOf(node.dataset.step ?? "") <= active);
@@ -66,7 +65,7 @@ function resetIncidentUi(required = 3): void {
   incidentId.textContent = "—";
   incidentSeenAt.textContent = "—";
   confirmationText.textContent = `0 / ${required} CONFIRMATIONS`;
-  callInstruction.textContent = "Start the Guava Expert, then dial after a sighting.";
+  callInstruction.textContent = "The authenticated robot API can place one outbound call.";
   callButton.classList.add("is-disabled");
   callButton.removeAttribute("href");
   callButton.setAttribute("aria-disabled", "true");
@@ -97,36 +96,30 @@ function renderIncident(incident: Incident, required: number): void {
   incidentId.textContent = incident.id;
   incidentSeenAt.textContent = incidentTime(incident.detected_at);
   confirmationText.textContent = `${required} / ${required} VERIFIED`;
-  if (incident.status !== "awaiting_inbound_call") {
-    callInstruction.textContent = `Guava recorded: ${incident.response ?? incident.status}.`;
+  if (incident.status !== "briefing_ready") {
+    callInstruction.textContent = `LiveKit call status: ${incident.response ?? incident.status}.`;
   } else if (analysisReady) {
     callInstruction.textContent =
-      "Dial the Guava number. Beacon will read the full OpenAI scene description aloud.";
+      "Brief ready. An authenticated robot event can dispatch the LiveKit outbound agent.";
   } else if (incident.analysis_status === "failed") {
     callInstruction.textContent = "OpenAI scene analysis failed. Reset the demo and try again.";
   } else {
-    callInstruction.textContent = "Wait for OpenAI to finish the scene description before dialing.";
+    callInstruction.textContent = "Wait for OpenAI to finish the observable scene briefing.";
   }
-  if (currentPhone && analysisReady) {
-    callButton.href = `tel:${currentPhone}`;
-    callButton.classList.remove("is-disabled");
-    callButton.setAttribute("aria-disabled", "false");
-  } else {
-    callButton.classList.add("is-disabled");
-    callButton.removeAttribute("href");
-    callButton.setAttribute("aria-disabled", "true");
-  }
+  callButton.classList.add("is-disabled");
+  callButton.removeAttribute("href");
+  callButton.setAttribute("aria-disabled", "true");
   if (incident.report_url) {
     reportButton.href = incident.report_url;
     reportButton.classList.remove("is-disabled");
     reportButton.setAttribute("aria-disabled", "false");
   }
   setFlow(
-    incident.status === "awaiting_inbound_call"
+    incident.status === "briefing_ready"
       ? analysisReady
         ? "incident"
         : "vision"
-      : "guava",
+      : "livekit",
   );
 }
 
@@ -139,8 +132,7 @@ async function getState(): Promise<AppState> {
 async function refreshState(): Promise<void> {
   try {
     const state = await getState();
-    currentPhone = state.phone_number;
-    phoneNumber.textContent = currentPhone ?? "SET GUAVA_AGENT_NUMBER";
+    phoneNumber.textContent = "RECIPIENT STORED SERVER-SIDE";
     if (state.incident) renderIncident(state.incident, state.required_streak);
     else if (currentIncidentId) resetIncidentUi(state.required_streak);
   } catch (error) {
@@ -323,7 +315,7 @@ cameraButton.addEventListener("click", startCamera);
 resetButton.addEventListener("click", resetDemo);
 callButton.addEventListener("click", (event) => {
   if (callButton.classList.contains("is-disabled")) event.preventDefault();
-  else setFlow("guava");
+  else setFlow("livekit");
 });
 
 window.addEventListener("beforeunload", () => {

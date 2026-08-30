@@ -1,7 +1,0 @@
-project_id = "gp-b9ddba54-d93f-403f-937a-c1d3fc8cb0e4"
-name = "beacon-call"
-call_direction = "inbound"
-base_image = "python-sandbox:3.12"
-tier = "guava-seed"
-replicas = 1
-enable_healthcheck = true

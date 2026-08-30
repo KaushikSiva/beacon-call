@@ -1,11 +1,11 @@
 [project]
 name = "beacon-call"
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.11"
-description = "Mac-first robot-camera scene analysis with a Guava inbound voice briefing"
+description = "Robot-camera incidents with LiveKit and Twilio outbound voice acknowledgment"
 dependencies = [
   "fastapi>=0.116,<1",
-  "guava-sdk>=0.40,<1",
+  "livekit-agents[openai]>=1.5,<2",
   "openai>=3.6.0",
   "python-dotenv>=1.1,<2",
   "reportlab>=5.0.1",
@@ -17,7 +17,6 @@ dependencies = [
 dev = [
   "httpx>=0.28,<1",
   "pytest>=8.4,<9",
-  "python-pptx>=1.0,<2",
   "ruff>=0.12,<1",
 ]
 

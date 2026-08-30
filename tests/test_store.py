@@ -29,7 +29,7 @@ def test_incident_round_trip(tmp_path: Path) -> None:
         bbox=box_at(250),
         detector_people_count=1,
     )
-    assert incident.status == "awaiting_inbound_call"
+    assert incident.status == "briefing_ready"
     assert store.latest() == incident
 
     analyzed = store.record_scene_analysis(
@@ -61,3 +61,28 @@ def test_reset_keeps_evidence_directory_safe(tmp_path: Path) -> None:
     store.create(camera_name="MAC-01", confidence=0.90, bbox=box_at(250))
     store.reset()
     assert store.latest() is None
+
+
+def test_outbound_incident_is_idempotent_across_store_instances(tmp_path: Path) -> None:
+    store = IncidentStore(tmp_path)
+    incident, duplicate = store.create_outbound(
+        idempotency_key="episode-everest-0001",
+        simulation_id="episode-0001",
+        observed_state="motionless_adult_in_snow",
+        distance_m=0.41,
+        camera_name="G1-HEAD-CAM",
+    )
+    assert duplicate is False
+    assert incident.status == "queued"
+
+    reopened = IncidentStore(tmp_path)
+    repeated, duplicate = reopened.create_outbound(
+        idempotency_key="episode-everest-0001",
+        simulation_id="different-value-is-ignored",
+        observed_state="motionless_adult_in_snow",
+        distance_m=0.12,
+        camera_name="G1-HEAD-CAM",
+    )
+    assert duplicate is True
+    assert repeated.id == incident.id
+    assert repeated.distance_m == 0.41
