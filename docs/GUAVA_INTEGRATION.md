@@ -7,11 +7,12 @@ BeaconCall uses Guava as the voice-agent sponsor integration, not as a logo-only
 1. `agent.listen_phone(GUAVA_AGENT_NUMBER)` attaches the local Expert to the Guava inbound number.
 2. `on_call_received` accepts the incoming call.
 3. `on_call_start` reads `runtime/latest-incident.json` and starts `camera_sighting_brief`.
-4. `call.set_task` gives the Guava Dialog System the OpenAI people count, scene description, and a short acknowledgement checklist.
-5. Two `guava.Field` values collect an optional operator name and a constrained response.
-6. `on_question` answers follow-up questions from the same live incident while repeating the presence-only limitation.
-7. `on_task_complete` writes the selected disposition, refreshes the PDF incident report, and closes with “Thanks, I'll get it reported to the rescue team.”
-8. `on_session_end` logs the termination reason.
+4. `call.read_script` speaks the complete OpenAI people count and scene description verbatim before any questions.
+5. `call.set_task` gives the Guava Dialog System a short acknowledgement checklist.
+6. Two `guava.Field` values collect an optional operator name and a constrained response.
+7. `on_question` answers follow-up questions from the same live incident while repeating the observable-scene limitation.
+8. `on_task_complete` writes the selected disposition, refreshes the PDF incident report, reads the closing line verbatim, and hangs up.
+9. `on_session_end` logs the termination reason.
 
 The camera image is never placed in the Guava task. OpenAI analyzes one incident frame first; Guava receives only its people count, factual scene description, camera metadata, and the explicit limitation.
 

@@ -21,6 +21,7 @@ from beacon_call.store import IncidentStore
 load_dotenv()
 logger = logging.getLogger("beacon_call.guava")
 store = IncidentStore.from_environment()
+CALL_CLOSING = "Thanks, I'll get it reported to the rescue team."
 
 agent = guava.Agent(
     name="Beacon",
@@ -39,10 +40,21 @@ def _incident_brief() -> tuple[str | None, str]:
             "There is no active camera sighting. Tell the caller the camera has not "
             "confirmed a person yet, and ask them to check the BeaconCall console."
         )
+    if (
+        incident.analysis_status == "complete"
+        and incident.people_count is not None
+        and incident.scene_description
+    ):
+        noun = "person" if incident.people_count == 1 else "people"
+        return incident.id, (
+            f"{incident.people_count} {noun} seen. Brief ready. OpenAI vision counted "
+            f"{incident.people_count} {noun}. {incident.scene_description} Observable scene "
+            f"only; condition unknown. Camera {incident.camera_name} created incident "
+            f"{incident.id} at {incident.detected_at_display}."
+        )
     return incident.id, (
-        f"{incident.summary} Camera {incident.camera_name} created incident {incident.id} at "
-        f"{incident.detected_at_display}. This is a visual observation, not a confirmed fall, "
-        "injury, or emergency."
+        f"Incident {incident.id} is confirmed, but the OpenAI scene description is not ready. "
+        "Please check the BeaconCall console and call again when it says Brief ready."
     )
 
 
@@ -56,15 +68,16 @@ def on_call_received(call_info: guava.CallInfo) -> guava.IncomingCallAction:
 def on_call_start(call: guava.Call) -> None:
     incident_id, brief = _incident_brief()
     logger.info("Call %s briefing incident %s", call.id, incident_id or "none")
+    call.read_script(f"BeaconCall camera update. {brief}")
     call.set_task(
         "camera_sighting_brief",
         objective=(
             "You are Beacon, the calm voice layer for a robot-camera console. "
-            f"Open with this exact operational context: {brief} "
+            "The exact camera update has already been read aloud. Do not skip directly to "
+            "acknowledgement before that script finishes. "
             "Keep the call under one minute unless the caller asks questions."
         ),
         checklist=[
-            guava.Say(f"BeaconCall camera update. {brief}"),
             guava.Field(
                 key="operator_name",
                 field_type="text",
@@ -114,7 +127,8 @@ def on_brief_complete(call: guava.Call) -> None:
         )
         logger.info("Incident report ready: %s", incident.report_url)
     logger.info("Call %s completed by %s: %s", call.id, operator_name, response)
-    call.hangup("Thanks, I'll get it reported to the rescue team.")
+    call.read_script(CALL_CLOSING)
+    call.hangup()
 
 
 @agent.on_session_end

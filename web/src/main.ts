@@ -81,8 +81,11 @@ function renderIncident(incident: Incident, required: number): void {
   incidentRail.classList.add("has-incident");
   incidentKicker.textContent = statusLabel(incident.status);
   const people = incident.people_count;
-  if (incident.analysis_status === "complete" && people !== null) {
+  const analysisReady = incident.analysis_status === "complete" && people !== null;
+  if (analysisReady) {
     incidentTitle.innerHTML = `${people} ${people === 1 ? "person" : "people"} seen.<br />Brief ready.`;
+  } else if (incident.analysis_status === "failed") {
+    incidentTitle.innerHTML = "Scene analysis<br />needs retry.";
   } else {
     incidentTitle.innerHTML = "Person seen.<br />Analyzing scene.";
   }
@@ -94,21 +97,37 @@ function renderIncident(incident: Incident, required: number): void {
   incidentId.textContent = incident.id;
   incidentSeenAt.textContent = incidentTime(incident.detected_at);
   confirmationText.textContent = `${required} / ${required} VERIFIED`;
-  callInstruction.textContent =
-    incident.status === "awaiting_inbound_call"
-      ? "Dial the Guava number. Beacon will speak this sighting and collect your response."
-      : `Guava recorded: ${incident.response ?? incident.status}.`;
-  if (currentPhone) {
+  if (incident.status !== "awaiting_inbound_call") {
+    callInstruction.textContent = `Guava recorded: ${incident.response ?? incident.status}.`;
+  } else if (analysisReady) {
+    callInstruction.textContent =
+      "Dial the Guava number. Beacon will read the full OpenAI scene description aloud.";
+  } else if (incident.analysis_status === "failed") {
+    callInstruction.textContent = "OpenAI scene analysis failed. Reset the demo and try again.";
+  } else {
+    callInstruction.textContent = "Wait for OpenAI to finish the scene description before dialing.";
+  }
+  if (currentPhone && analysisReady) {
     callButton.href = `tel:${currentPhone}`;
     callButton.classList.remove("is-disabled");
     callButton.setAttribute("aria-disabled", "false");
+  } else {
+    callButton.classList.add("is-disabled");
+    callButton.removeAttribute("href");
+    callButton.setAttribute("aria-disabled", "true");
   }
   if (incident.report_url) {
     reportButton.href = incident.report_url;
     reportButton.classList.remove("is-disabled");
     reportButton.setAttribute("aria-disabled", "false");
   }
-  setFlow(incident.status === "awaiting_inbound_call" ? "incident" : "guava");
+  setFlow(
+    incident.status === "awaiting_inbound_call"
+      ? analysisReady
+        ? "incident"
+        : "vision"
+      : "guava",
+  );
 }
 
 async function getState(): Promise<AppState> {

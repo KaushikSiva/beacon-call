@@ -55,7 +55,8 @@ The Expert uses Guava's real inbound primitives:
 
 - `listen_phone` attaches BeaconCall to a Guava number.
 - `on_call_start` loads the latest camera sighting.
-- `set_task` creates the briefing and response checklist.
+- `read_script` speaks the complete OpenAI people count and scene description verbatim.
+- `set_task` creates the response checklist only after that briefing starts.
 - `Field` constrains the operator response to three choices.
 - `on_question` answers follow-ups from live incident context.
 - `on_task_complete` records the acknowledgement, refreshes the PDF, and ends with: **“Thanks, I'll get it reported to the rescue team.”**
@@ -203,7 +204,7 @@ make test
 
 Verified on Apple silicon:
 
-- 11 Python tests
+- 13 Python tests
 - 2 TypeScript tests
 - Ruff clean
 - TypeScript strict-mode clean
