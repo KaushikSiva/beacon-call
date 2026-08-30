@@ -1,0 +1,24 @@
+{
+  "name": "beacon-call-console",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "deck": "uv run python scripts/create_deck.py"
+  },
+  "dependencies": {
+    "@tensorflow-models/coco-ssd": "2.2.3",
+    "@tensorflow/tfjs": "4.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2",
+    "vite": "8.2.2",
+    "vitest": "3.2.7"
+  }
+}

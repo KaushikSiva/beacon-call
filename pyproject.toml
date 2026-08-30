@@ -1,0 +1,28 @@
+[project]
+name = "beacon-call"
+version = "0.1.0"
+requires-python = ">=3.11"
+description = "Mac-first robot-camera presence detection with a Guava inbound voice briefing"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "guava-sdk>=0.40,<1",
+  "python-dotenv>=1.1,<2",
+  "typing_extensions",
+  "uvicorn[standard]>=0.35,<1",
+]
+
+[dependency-groups]
+dev = [
+  "httpx>=0.28,<1",
+  "pytest>=8.4,<9",
+  "python-pptx>=1.0,<2",
+  "ruff>=0.12,<1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
